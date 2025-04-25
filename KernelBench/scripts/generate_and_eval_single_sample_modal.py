@@ -5,6 +5,9 @@ import torch
 import json
 import modal
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from datasets import load_dataset
 
 #from src.dataset import construct_kernelbench_dataset
@@ -99,6 +102,7 @@ image = (
         "pytest",
         "ninja",
         "utils",
+        "python-dotenv", # NATHAN ADDED THIS LINE 
     )
 )
 

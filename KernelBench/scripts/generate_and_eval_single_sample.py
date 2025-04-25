@@ -4,6 +4,9 @@ import os, sys
 import torch
 import json
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from datasets import load_dataset
 
 from src.dataset import construct_kernelbench_dataset

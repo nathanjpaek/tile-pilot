@@ -13,6 +13,7 @@ import math
 import os
 import json
 from tqdm import tqdm
+from dotenv import load_dotenv 
 
 # API clients
 from together import Together
@@ -32,6 +33,9 @@ from transformers import AutoTokenizer
 import hashlib
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
+
+#load_dotenv()
+
 
 # Define API key access
 TOGETHER_KEY = os.environ.get("TOGETHER_API_KEY")
