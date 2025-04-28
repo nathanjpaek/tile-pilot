@@ -1,8 +1,3 @@
-# KittenScheduler
+# TilePilot: A Lightweight Framework for Optimizing GPU Kernels
 
-conda create -n kitten-scheduler python=3.11
-
-conda activate kitten-scheduler
-
-pip install -r KernelBench/requirements.txt
-
+yuh
