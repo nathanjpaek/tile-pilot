@@ -12,7 +12,7 @@ from datasets import load_dataset
 
 #from src.dataset import construct_kernelbench_dataset
 from src.eval import eval_kernel_against_ref
-from src.prompt_constructor import prompt_generate_custom_cuda_from_prompt_template
+from src.prompt_constructor import prompt_generate_custom_cuda_from_prompt_template, prompt_generate_custom_tilelang_from_prompt_template
 from src.utils import extract_first_code, query_server, set_gpu_arch, read_file, create_inference_server_from_presets
 
 app = modal.App("eval_single_sample")
@@ -36,7 +36,7 @@ class EvalConfig(Config):
         # name of dataset name on Hugging Face
         self.dataset_name = "ScalingIntelligence/KernelBench"
 
-
+        self.language = "cuda"
         # Problem Specification
         self.level = REQUIRED
         # NOTE: this is the logical index (problem id the problem_name)\
@@ -103,6 +103,7 @@ image = (
         "ninja",
         "utils",
         "python-dotenv", # NATHAN ADDED THIS LINE 
+        "tilelang",
     )
 )
 
@@ -176,12 +177,18 @@ def main(config: EvalConfig):
                                                         verbose=config.verbose, 
                                                         time_generation=True)
     
+    if config.language == "cuda":
+        custom_cuda_prompt = prompt_generate_custom_cuda_from_prompt_template(ref_arch_src)
+    elif config.language == "tilelang":
+        custom_cuda_prompt = prompt_generate_custom_tilelang_from_prompt_template(ref_arch_src)
+    else:
+        raise ValueError(f"Unsupported language specified: {config.language}. Choose 'cuda' or 'tilelang'.")
 
 
-    custom_cuda_prompt = prompt_generate_custom_cuda_from_prompt_template(ref_arch_src)
     if config.log_prompt:
         with open(os.path.join(config.logdir, f"prompt_level_{config.level}_problem_{config.problem_id}.txt"), "w") as f:
             f.write(custom_cuda_prompt)
+
 
     # Query server with constructed prompt
     custom_cuda = inference_server(custom_cuda_prompt)

@@ -31,6 +31,43 @@ def get_arch_definition(arch_src):
     prompt = f"Here is a pytorch defintion of a neural network architecture in the file model.py: ```{arch_src}```\n"
     return prompt
 
+############################################
+# tilelang Prompt
+############################################
+PROBLEM_STATEMENT_TILELANG = """You write custom TileLang kernels using the tilelang library to replace the PyTorch operators in the given architecture to get speedups. \n
+    You should output a Python class `ModelNew(nn.Module)` that defines and compiles the TileLang kernel within its `__init__` method and calls the compiled kernel in its `forward` method. Focus on generating the `@T.prim_func` definition based on the PyTorch logic.\n
+"""
+
+PROBLEM_INSTRUCTION_TILELANG = """
+Optimize the architecture named Model using TileLang kernels! Name your optimized output architecture ModelNew. Inside ModelNew's __init__, define the TileLang kernel using the @T.prim_func decorator and necessary tilelang.language (T) constructs. Then, compile it using `tilelang.compile(your_prim_func, out_idx=-1)`. Store the compiled kernel as an attribute (e.g., self.compiled_kernel). In the ModelNew's forward method, call this compiled kernel (e.g., `return self.compiled_kernel(input_args)`). Output the new code for ModelNew in a single Python code block. Please generate real, functional TileLang and PyTorch code, NOT pseudocode. Make sure necessary imports like `tilelang` and `tilelang.language as T` are included. Just output the new model code, no other text, and NO testing code! \n
+"""
+
+def prompt_generate_custom_tilelang(
+    arc_src: str, example_arch_src_tilelang: str, example_new_arch_src_tilelang: str
+) -> str:
+    prompt = PROBLEM_STATEMENT_TILELANG
+
+    if example_arch_src_tilelang != "" and example_new_arch_src_tilelang != "":
+        prompt += f"""
+        Here's an example of how to define and compile a TileLang kernel within a PyTorch Module. The example given architecture is: \n
+        ``` \n
+        {example_arch_src_tilelang}
+        ``` \n
+        The example optimized architecture using TileLang looks like this:
+        ```
+        {example_new_arch_src_tilelang}
+        ``` \n
+        """
+
+    prompt += f"""
+    You are given the following architecture: \n
+    ```
+    {arc_src}
+    ```
+    """
+    prompt += PROBLEM_INSTRUCTION_TILELANG
+    return prompt
+
 
 ############################################
 # CUDA Prompt
@@ -345,6 +382,40 @@ def prompt_generate_custom_cuda_from_prompt_template(ref_arch_src: str) -> str:
     example_new_arch = read_file(example_new_arch_path)
 
     return prompt_generate_custom_cuda(arch, example_arch, example_new_arch)
+
+#### Added tilelang function
+
+def prompt_generate_custom_tilelang_from_prompt_template(ref_arch_src: str) -> str:
+    """
+    Using prompt example (an element-wise addition) for prompt templates
+    The most basic form of example just to show LLM the task and the expected output format
+    """
+    arch = ref_arch_src
+    # These are strictly defined for now
+
+    # path to prompt template, show an example of Model (torch specifications) and ModelNew (torch + custom CUDA kernels)
+    example_arch_path = os.path.join(
+        REPO_TOP_PATH, f"src/prompts/model_ex_add.py"
+    )
+    example_new_arch_path = os.path.join(
+        REPO_TOP_PATH, f"src/prompts/model_new_ex_add_tilelang.py"
+    )
+
+    if not os.path.exists(example_arch_path):
+        raise FileNotFoundError(
+            f"Example architecture file not found: {example_arch_path}"
+        )
+    if not os.path.exists(example_new_arch_path):
+        raise FileNotFoundError(
+            f"Example new architecture file not found: {example_new_arch_path}"
+        )
+
+    example_arch = read_file(example_arch_path)
+    example_new_arch = read_file(example_new_arch_path)
+
+    return prompt_generate_custom_tilelang(arch, example_arch, example_new_arch)
+
+#### 
 
 
 def prompt_generate_prompt_with_hardware_info_from_template(ref_arch_src: str, gpu_name: str) -> str:
