@@ -85,8 +85,8 @@ ref_c = a @ b
 print("Kernel output matches PyTorch reference.")
 
 # 4. Retrieve and inspect the generated CUDA source (optional)
-# cuda_source = jit_kernel.get_kernel_source()
-# print("Generated CUDA kernel:\n", cuda_source)
+cuda_source = jit_kernel.get_kernel_source()
+print("Generated CUDA kernel:\n", cuda_source)
 
 # 5.Pofile latency with the profiler
 profiler = jit_kernel.get_profiler()

@@ -92,6 +92,6 @@ def get_init_inputs():
 if __name__ == "__main__":
     device = torch.device("cuda")
     model = Model().to(device)
-    inputs = get_inputs(device)
+    inputs = get_inputs()
     output = model(*inputs)
     print(output)
