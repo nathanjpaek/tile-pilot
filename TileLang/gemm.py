@@ -9,6 +9,9 @@ from tilelang.intrinsics import (
 
 def matmul(M, N, K, block_M, block_N, block_K, dtype="float16", accum_dtype="float"):
     # add decorator @tilelang.jit if you want to return a torch function
+    @tilelang.jit(
+        out_idx=-1,  # create the output tensor during runtime
+    )
     @T.prim_func
     def main(
         A: T.Tensor((M, K), dtype),
@@ -64,7 +67,7 @@ func = matmul(M, N, K, 128, 128, 32)
 # out_idx specifies the index of the output buffer in the argument list
 # if out_idx is specified, the tensor will be created during runtime
 # target currently can be "cuda" or "hip" or "cpu".
-jit_kernel = tilelang.compile(func, out_idx=[2], target="cuda")
+# jit_kernel = tilelang.compile(func, out_idx=[2], target="cuda")
 
 # 3. Test the kernel in Python with PyTorch data
 import torch
@@ -75,18 +78,18 @@ b = torch.randn(K, N, device="cuda", dtype=torch.float16)
 
 
 # Run the kernel through the JIT-compiled function
-c = jit_kernel(a, b)
+c = func(a, b)
 
 # Reference multiplication using PyTorch
 ref_c = a @ b
 
 # Validate correctness
-# torch.testing.assert_close(c, ref_c, rtol=1e-2, atol=1e-2)
+torch.testing.assert_close(c, ref_c, rtol=1e-2, atol=1e-2)
 print("Kernel output matches PyTorch reference.")
 
 # 4. Retrieve and inspect the generated CUDA source (optional)
-cuda_source = jit_kernel.get_kernel_source()
-print("Generated CUDA kernel:\n", cuda_source)
+# cuda_source = jit_kernel.get_kernel_source()
+# print("Generated CUDA kernel:\n", cuda_source)
 
 # 5.Pofile latency with the profiler
 profiler = jit_kernel.get_profiler()
