@@ -138,6 +138,35 @@ def load_custom_model(
     ModelNew = context.get("ModelNew")
     return ModelNew
 
+##### added model loader for Tilelang #####
+
+def load_tilelang_model(model_custom_src: str, context: dict, build_directory: str = None) -> nn.Module:  
+    if build_directory:  
+        context["BUILD_DIRECTORY"] = build_directory  
+    
+    # Nathan TODO: Make compatible with tilelang
+
+    import tempfile  
+    with tempfile.NamedTemporaryFile(suffix='.py', mode='w', delete=False) as f:  
+        f.write(model_custom_src)  
+        temp_file_path = f.name  
+      
+    import importlib.util  
+    import sys  
+      
+    spec = importlib.util.spec_from_file_location("tilelang_model", temp_file_path)  
+    module = importlib.util.module_from_spec(spec)  
+    sys.modules["tilelang_model"] = module  
+    spec.loader.exec_module(module)  
+      
+    import os  
+    os.unlink(temp_file_path)  
+      
+    ModelNew = getattr(module, "ModelNew")  
+    return ModelNew
+
+###########################################
+
 
 def _cleanup_cuda_extensions():
     """Helper function to cleanup compiled CUDA extensions"""
@@ -301,6 +330,7 @@ def eval_kernel_against_ref(
     measure_performance: bool = False,
     build_dir: os.PathLike = None,
     device: torch.device = torch.cuda.current_device() if torch.cuda.is_available() else None, # have to run on GPU
+    language: str = "cuda",
 ) -> KernelExecResult:
     """
     Evaluate the custom kernel against the original model
@@ -353,7 +383,12 @@ def eval_kernel_against_ref(
     try:
         os.environ["TORCH_USE_CUDA_DSA"] = "1"  # compile with device side assertion
         # add hash for later to distinguish between multi-turn kernels
-        ModelNew = load_custom_model(custom_model_src, context, build_dir)
+
+        if language.lower() == "tilelang":  
+            ModelNew = load_tilelang_model(custom_model_src, context, build_dir)  
+        else:  
+            ModelNew = load_custom_model(custom_model_src, context, build_dir)  
+
         torch.cuda.synchronize(device=device)  # not sure if this is too much
     except Exception as e:
         print(

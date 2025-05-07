@@ -111,7 +111,7 @@ image = (
 class EvalFunc:
 
     @modal.method()
-    def eval_single_sample_modal(self, ref_arch_src, custom_cuda, verbose, gpu_arch):
+    def eval_single_sample_modal(self, ref_arch_src, custom_cuda, verbose, gpu_arch, language):
         # 3. Evaluate Kernel
         # NOTE: no need to wrap around process here as only a single sample
         # see batch eval for examples of process isolation
@@ -119,7 +119,7 @@ class EvalFunc:
         from src.utils import set_gpu_arch
         set_gpu_arch(gpu_arch)
         return eval_kernel_against_ref(
-            ref_arch_src, custom_cuda, verbose=verbose, measure_performance=True, num_correct_trials=5, num_perf_trials=100
+            ref_arch_src, custom_cuda, verbose=verbose, measure_performance=True, num_correct_trials=5, num_perf_trials=100, language=language
         )
 
 @pydra.main(base=EvalConfig)
@@ -202,7 +202,7 @@ def main(config: EvalConfig):
             f.write(custom_cuda)
 
     with app.run():
-        kernel_exec_result = EvalFunc.with_options(gpu=config.gpu)().eval_single_sample_modal.remote(ref_arch_src, custom_cuda, config.verbose, gpu_arch_mapping[config.gpu])
+        kernel_exec_result = EvalFunc.with_options(gpu=config.gpu)().eval_single_sample_modal.remote(ref_arch_src, custom_cuda, config.verbose, gpu_arch_mapping[config.gpu], config.language)
         
         print(f"Evaluation result for level {config.level} problem {config.problem_id}:\n{kernel_exec_result}")
         
