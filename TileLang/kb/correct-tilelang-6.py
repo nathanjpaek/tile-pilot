@@ -74,3 +74,11 @@ class ModelNew(nn.Module):
 
         matmul_kernel = matmul(M, N, K)
         return matmul_kernel(A, B)
+
+
+if __name__ == "__main__":
+    model = ModelNew()
+    A = torch.randn(1024, 1024, device="cuda", dtype=torch.float16)
+    B = torch.randn(1024, 1024, device="cuda", dtype=torch.float16)
+    C = model(A, B)
+    print(C)
