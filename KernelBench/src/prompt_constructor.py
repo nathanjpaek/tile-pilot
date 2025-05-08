@@ -395,10 +395,10 @@ def prompt_generate_custom_tilelang_from_prompt_template(ref_arch_src: str) -> s
 
     # path to prompt template, show an example of Model (torch specifications) and ModelNew (torch + custom CUDA kernels)
     example_arch_path = os.path.join(
-        REPO_TOP_PATH, f"src/prompts/model_ex_add.py"
+        REPO_TOP_PATH, f"KernelBench/level1/6_Matmul_with_large_K_dimension_.py"
     )
     example_new_arch_path = os.path.join(
-        REPO_TOP_PATH, f"src/prompts/model_new_ex_add_tilelang.py"
+        REPO_TOP_PATH, f"../TileLang/kb/tilelang_6.py"
     )
 
     if not os.path.exists(example_arch_path):

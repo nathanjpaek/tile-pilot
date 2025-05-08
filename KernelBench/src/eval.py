@@ -141,28 +141,26 @@ def load_custom_model(
 ##### added model loader for Tilelang #####
 
 def load_tilelang_model(model_custom_src: str, context: dict, build_directory: str = None) -> nn.Module:  
-    if build_directory:  
-        context["BUILD_DIRECTORY"] = build_directory  
-    
-    # Nathan TODO: Make compatible with tilelang
+    """
+    Load class from custom NN.module pytorch code
+    this is the code output by LLM with calls to custom cuda kernels
+    """
+    if build_directory:
+        context["BUILD_DIRECTORY"] = build_directory
+        # Add import at the start of the source code
+        model_custom_src = (
+            "import os\n" f"os.environ['TORCH_EXTENSIONS_DIR'] = '{build_directory}'\n"
+        ) + model_custom_src
 
-    import tempfile  
-    with tempfile.NamedTemporaryFile(suffix='.py', mode='w', delete=False) as f:  
-        f.write(model_custom_src)  
-        temp_file_path = f.name  
-      
-    import importlib.util  
-    import sys  
-      
-    spec = importlib.util.spec_from_file_location("tilelang_model", temp_file_path)  
-    module = importlib.util.module_from_spec(spec)  
-    sys.modules["tilelang_model"] = module  
-    spec.loader.exec_module(module)  
-      
-    import os  
-    os.unlink(temp_file_path)  
-      
-    ModelNew = getattr(module, "ModelNew")  
+    try:
+        compile(model_custom_src, "<string>", "exec")
+        exec(model_custom_src, context)
+        # DANGER: need to delete refernece from global namespace
+    except SyntaxError as e:
+        print(f"Syntax Error in custom generated code or Compilation Error {e}")
+        return None
+
+    ModelNew = context.get("ModelNew")
     return ModelNew
 
 ###########################################
