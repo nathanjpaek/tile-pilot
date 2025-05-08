@@ -140,28 +140,35 @@ def load_custom_model(
 
 ##### added model loader for Tilelang #####
 
-def load_tilelang_model(model_custom_src: str, context: dict, build_directory: str = None) -> nn.Module:  
-    """
-    Load class from custom NN.module pytorch code
-    this is the code output by LLM with calls to custom cuda kernels
-    """
+import hashlib, linecache, textwrap, os, types
+
+def load_tilelang_model(model_custom_src: str,
+                        context: dict,
+                        build_directory: str | None = None):
+
     if build_directory:
-        context["BUILD_DIRECTORY"] = build_directory
-        # Add import at the start of the source code
         model_custom_src = (
-            "import os\n" f"os.environ['TORCH_EXTENSIONS_DIR'] = '{build_directory}'\n"
-        ) + model_custom_src
+            "import os\n"
+            f"os.environ['TORCH_EXTENSIONS_DIR'] = '{build_directory}'\n"
+            + model_custom_src
+        )
 
-    try:
-        compile(model_custom_src, "<string>", "exec")
-        exec(model_custom_src, context)
-        # DANGER: need to delete refernece from global namespace
-    except SyntaxError as e:
-        print(f"Syntax Error in custom generated code or Compilation Error {e}")
-        return None
+    # ADDED: register source so inspect.getsource works
+    fake_fname = (
+        f"/tmp/tilelang_kernel_"
+        f"{hashlib.md5(model_custom_src.encode()).hexdigest()}.py"
+    )
+    # linecache expects a list with trailing newlines
+    linecache.cache[fake_fname] = (
+        len(model_custom_src),
+        None,
+        model_custom_src.splitlines(True),
+        fake_fname,
+    )
 
-    ModelNew = context.get("ModelNew")
-    return ModelNew
+    code_obj = compile(model_custom_src, fake_fname, "exec")
+    exec(code_obj, context)
+    return context["ModelNew"]
 
 ###########################################
 

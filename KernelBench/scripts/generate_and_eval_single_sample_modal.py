@@ -195,7 +195,7 @@ def main(config: EvalConfig):
     custom_cuda = inference_server(custom_cuda_prompt)
 
     ###### DEBUGGING!! #######
-    custom_cuda = "```python\n" + open("TileLang/kb/tilelang_6.py").read() + "\n```"
+    custom_cuda = "```python\n" + open("KernelBench/src/prompts/tilelang_model_new_matmul.py").read() + "\n```"
     #print(custom_cuda)
     ########################
     #print("\nBRhdsofugihosidhfgsdkfaldksfj\n")

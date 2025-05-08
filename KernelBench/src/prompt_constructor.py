@@ -398,7 +398,7 @@ def prompt_generate_custom_tilelang_from_prompt_template(ref_arch_src: str) -> s
         REPO_TOP_PATH, f"KernelBench/level1/6_Matmul_with_large_K_dimension_.py"
     )
     example_new_arch_path = os.path.join(
-        REPO_TOP_PATH, f"../TileLang/kb/tilelang_6.py"
+        REPO_TOP_PATH, f"src/prompts/tilelang_model_new_matmul.py"
     )
 
     if not os.path.exists(example_arch_path):
