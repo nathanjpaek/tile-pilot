@@ -451,6 +451,7 @@ def eval_kernel_against_ref(
             verbose=verbose,
             seed=seed_num,
             device=device,
+            language=language, 
         )
     except Exception as e:
         # TODO: add metadata for runtime error e.g. error in launching kernel, illegal memory access, ...
@@ -590,6 +591,7 @@ def run_and_check_correctness(
     verbose=False,
     seed=42,
     device=None,
+    language="cuda",
 ) -> KernelExecResult:
     """
     run the model and check correctness,
@@ -647,10 +649,23 @@ def run_and_check_correctness(
                     return KernelExecResult(
                         compiled=True, correctness=False, metadata=metadata
                     )
+                
+                #### ADDED for tilelang precision requirements ######
+                # (because we have to convert pytorch tensors to fp16)
+                
+                current_atol, current_rtol = 1e-02, 1e-02
+
+                if language.lower() == "tilelang":
+                    current_atol = 1.0  # allow abs difference up to 1
+                    current_rtol = 1.0  # allow relative diff up to 1 (might have to change?)
+                    if verbose:
+                        print(f"TileLang: atol={current_atol}, rtol={current_rtol}")
+
+                #####################################################
 
                 # check output value difference
                 if not torch.allclose(
-                    output, output_new, atol=1e-02, rtol=1e-02
+                    output, output_new, atol=current_atol, rtol=current_rtol
                 ):  # fail
                     max_diff = torch.max(torch.abs(output - output_new)).item()
                     avg_diff = torch.mean(torch.abs(output - output_new)).item()

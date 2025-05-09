@@ -55,14 +55,22 @@ class ModelNew(nn.Module):
         super(ModelNew, self).__init__()
 
     def forward(self, A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
-        orig_dtype = A.dtype
-        A16 = A.to(dtype=torch.float16, device="cuda")
-        B16 = B.to(dtype=torch.float16, device="cuda")
+        """
+        Performs matrix multiplication of A and B.
 
-        M, K = A16.shape
-        N = B16.shape[1]
+        Args:
+            A: Input tensor of shape (M, K)
+            B: Input tensor of shape (K, N)
+
+        Returns:
+            Output tensor of shape (M, N)
+        """
+        # TileLang only supports float16 on CUDA
+        A = A.to(device="cuda", dtype=torch.float16)
+        B = B.to(device="cuda", dtype=torch.float16)
+
+        M, K = A.shape
+        N = B.shape[1]
+
         matmul_kernel = matmul(M, N, K)
-
-        C16 = matmul_kernel(A16, B16)
-
-        return C16.to(orig_dtype)
+        return matmul_kernel(A, B).to(torch.float32)

@@ -39,7 +39,18 @@ PROBLEM_STATEMENT_TILELANG = """You write custom TileLang kernels using the tile
 """
 
 PROBLEM_INSTRUCTION_TILELANG = """
-Optimize the architecture named Model using TileLang kernels! Name your optimized output architecture ModelNew. Inside ModelNew's __init__, define the TileLang kernel using the @T.prim_func decorator and necessary tilelang.language (T) constructs. Then, compile it using `tilelang.compile(your_prim_func, out_idx=-1)`. Store the compiled kernel as an attribute (e.g., self.compiled_kernel). In the ModelNew's forward method, call this compiled kernel (e.g., `return self.compiled_kernel(input_args)`). Output the new code for ModelNew in a single Python code block. Please generate real, functional TileLang and PyTorch code, NOT pseudocode. Make sure necessary imports like `tilelang` and `tilelang.language as T` are included. Just output the new model code, no other text, no comments, and NO testing code! \n
+Optimize the architecture named Model using TileLang kernels! Name your optimized output architecture ModelNew. 
+
+Rules: 
+
+- Define and compile TileLang kernels in the __init__ method
+- Call the compiled kernel in the forward method
+- Focus on replacing PyTorch operators with efficient TileLang implementations
+- Ensure your implementation maintains the same functionality as the original model
+- Use proper tilelang.language (T) constructs for parallelism and memory access patterns
+- Use @tilelang.jit(out_idx=-1) to create the output tensor during runtime
+
+Please generate real, functional TileLang and PyTorch code, NOT pseudocode. Make sure necessary imports like `tilelang` and `tilelang.language as T` are included. Just output the new model code, no other text, no comments, and NO testing code! \n
 """
 
 def prompt_generate_custom_tilelang(
@@ -394,12 +405,22 @@ def prompt_generate_custom_tilelang_from_prompt_template(ref_arch_src: str) -> s
     # These are strictly defined for now
 
     # path to prompt template, show an example of Model (torch specifications) and ModelNew (torch + custom CUDA kernels)
+
     example_arch_path = os.path.join(
         REPO_TOP_PATH, f"KernelBench/level1/6_Matmul_with_large_K_dimension_.py"
     )
+
+    #example_arch_path = os.path.join(
+    #    REPO_TOP_PATH, f"src/prompts/model_ex_add.py"
+    #)
+
     example_new_arch_path = os.path.join(
         REPO_TOP_PATH, f"src/prompts/tilelang_model_new_matmul.py"
     )
+
+    #example_new_arch_path = os.path.join(
+    #    REPO_TOP_PATH, f"src/prompts/tilelang_model_new_ex_add.py"
+    #)
 
     if not os.path.exists(example_arch_path):
         raise FileNotFoundError(
