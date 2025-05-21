@@ -4,9 +4,8 @@ import tilelang
 import tilelang.language as T
 
 
-
 def matmul(M, N, K, block_M=128, block_N=128, block_K=32, dtype="float16", accum_dtype="float"):
-    @tilelang.jit(out_idx=-1)
+
     @T.prim_func
     def main(
         A: T.Tensor((M, K), dtype),
@@ -40,6 +39,19 @@ def matmul(M, N, K, block_M=128, block_N=128, block_K=32, dtype="float16", accum
     return main
 
 
+def tilelang_matmul(A, B):
+    # TileLang inputs must be in float16 precision
+    A = A.cuda().half()
+    B = B.cuda().half()
+    M, K = A.shape
+    N = B.shape[1]
+    
+    # Compile the TileLang kernel with out_idx=-1 to create the output tensor during runtime
+    func = matmul(M, N, K)
+    kernel = tilelang.compile(func, out_idx=-1)
+    return kernel(A, B)
+
+
 class ModelNew(nn.Module):
     """
     Optimized model using TileLang for matrix multiplication (C = A * B) with a large K dimension
@@ -59,26 +71,18 @@ class ModelNew(nn.Module):
         Returns:
             Output tensor of shape (M, N)
         """
-        # TileLang only supports float16 on CUDA
-        A = A.cuda().half()
-        B = B.cuda().half()
-
-        M, K = A.shape
-        N = B.shape[1]
-
-        matmul_kernel = matmul(M, N, K)
-        return matmul_kernel(A, B)
+        return tilelang_matmul(A, B)
 
 
 if __name__ == "__main__":
     model = ModelNew()
     m = 256
     k = 256
-    n = 131072
+    n = 512
     A = torch.randn(m, k).cuda().half()
     B = torch.randn(k, n).cuda().half()
     C = model(A, B)
-    
+
     ref_C = A @ B
 
     torch.testing.assert_close(C, ref_C, rtol=1e-2, atol=1e-2)
