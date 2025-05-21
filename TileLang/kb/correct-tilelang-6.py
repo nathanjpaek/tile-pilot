@@ -1,43 +1,37 @@
 import torch
 import torch.nn as nn
-
 import tilelang
 import tilelang.language as T
 
 
+
 def matmul(M, N, K, block_M=128, block_N=128, block_K=32, dtype="float16", accum_dtype="float"):
-    @tilelang.jit(
-        out_idx=-1,  # create the output tensor during runtime
-    )
+    @tilelang.jit(out_idx=-1)
     @T.prim_func
     def main(
         A: T.Tensor((M, K), dtype),
         B: T.Tensor((K, N), dtype),
         C: T.Tensor((M, N), dtype),
     ):
-        # Initialize Kernel Context
+        # Define a grid with enough blocks to cover M×N
         with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by):
-            # Allocate shared and local fragments
+            # Allocate shared memory for the current tile of A and B
             A_shared = T.alloc_shared((block_M, block_K), dtype)
             B_shared = T.alloc_shared((block_K, block_N), dtype)
+
+            # Allocate a local (register) fragment for partial accumulations
             C_local = T.alloc_fragment((block_M, block_N), accum_dtype)
 
-            # Clear the local accumulation buffer
+            # Initialize the local accumulation buffer to zero
             T.clear(C_local)
 
-            # Pipelined iteration over K dimension
+            # Loop over the K dimension in block_K chunks, using a 3-stage pipeline
+            for k in T.Pipelined(T.ceildiv(K, block_K), num_stages=3):
+                # Parallelized copy from global memory to shared memory
+                T.copy(A[by * block_M, k * block_K], A_shared)
+                T.copy(B[k * block_K, bx * block_N], B_shared)
 
-            for ko in T.Pipelined(T.ceildiv(K, block_K), num_stages=3):
-                # Copy tile of A
-                # This is a sugar syntax for parallelized copy
-                T.copy(A[by * block_M, ko * block_K], A_shared)
-
-                # Parallelized copy of tiles from global to shared for B
-                for k, j in T.Parallel(block_K, block_N):
-                    B_shared[k, j] = B[ko * block_K + k, bx * block_N + j]
-
-                # Perform a tile-level GEMM on the shared buffers
-                # Currently we dispatch to the cute/hip on Nvidia/AMD GPUs
+                # Copy the accumulated result from local memory (C_local) to global memory (C)
                 T.gemm(A_shared, B_shared, C_local)
 
             # Copy result back to global memory
@@ -66,8 +60,8 @@ class ModelNew(nn.Module):
             Output tensor of shape (M, N)
         """
         # TileLang only supports float16 on CUDA
-        A = A.to(device="cuda", dtype=torch.float16)
-        B = B.to(device="cuda", dtype=torch.float16)
+        A = A.cuda().half()
+        B = B.cuda().half()
 
         M, K = A.shape
         N = B.shape[1]
@@ -78,7 +72,14 @@ class ModelNew(nn.Module):
 
 if __name__ == "__main__":
     model = ModelNew()
-    A = torch.randn(1024, 1024, device="cuda", dtype=torch.float16)
-    B = torch.randn(1024, 1024, device="cuda", dtype=torch.float16)
+    m = 256
+    k = 256
+    n = 131072
+    A = torch.randn(m, k).cuda().half()
+    B = torch.randn(k, n).cuda().half()
     C = model(A, B)
-    print(C)
+    
+    ref_C = A @ B
+
+    torch.testing.assert_close(C, ref_C, rtol=1e-2, atol=1e-2)
+    print("Kernel output matches PyTorch reference.")
