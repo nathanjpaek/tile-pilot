@@ -1,419 +1,346 @@
 """
 DSPy RAG Pipeline for TileLang Kernel Optimization
 
-This script sets up a retrieval-augmented generation system using DSPy
-to optimize PyTorch models with TileLang kernels.
+This follows the official DSPy RAG tutorial structure for building
+a retrieval-augmented generation system for TileLang optimizations.
 """
 
 import os
 import json
 import dspy
-# from dspy.retrieve import ColBERTv2
-from typing import List, Dict, Tuple
-import chromadb
-from chromadb.utils import embedding_functions
-import glob
 from pathlib import Path
-
-
-# ============= Step 1: Document Processing =============
-
-
-class TileLangDocumentProcessor:
-    """Process and structure TileLang documentation and examples."""
-
-    def __init__(self, base_path: str):
-        self.base_path = base_path
-        self.documents = []
-
-    def process_tilelang_examples(self, examples_dir: str) -> List[Dict]:
-        """Extract PyTorch -> TileLang transformation examples from folder structure."""
-        examples = []
-
-        # Each subdirectory is an example
-        for example_dir in [d for d in Path(examples_dir).iterdir() if d.is_dir()]:
-            example_id = example_dir.name
-
-            # Read the required files
-            original_path = example_dir / "original.py"
-            tilelang_path = example_dir / "tilelang.py"
-            metadata_path = example_dir / "metadata.json"
-
-            # Skip if required files don't exist
-            if not (original_path.exists() and tilelang_path.exists()):
-                print(f"Warning: Skipping {example_id} - missing required files")
-                continue
-
-            # Read original PyTorch code
-            with open(original_path, "r") as f:
-                original_code = f.read()
-
-            # Read TileLang optimized code
-            with open(tilelang_path, "r") as f:
-                tilelang_code = f.read()
-
-            # Read metadata if it exists
-            metadata = {}
-            if metadata_path.exists():
-                with open(metadata_path, "r") as f:
-                    metadata = json.load(f)
-
-            # Extract additional metadata from code
-            metadata.update(self._extract_metadata(tilelang_code))
-
-            # Create example entry
-            examples.append(
-                {
-                    "id": example_id,
-                    "dir_path": str(example_dir),
-                    "original_code": original_code,
-                    "tilelang_code": tilelang_code,
-                    "type": "example",
-                    "metadata": metadata,
-                }
-            )
-
-            print(f"Loaded example: {example_id}")
-
-        return examples
-
-    def process_documentation(self, docs_dir: str) -> List[Dict]:
-        """Process TileLang documentation files."""
-        docs = []
-
-        for file_path in glob.glob(f"{docs_dir}/**/*.md", recursive=True):
-            with open(file_path, "r") as f:
-                content = f.read()
-
-            # Extract code blocks and explanations
-            docs.append(
-                {
-                    "id": Path(file_path).stem,
-                    "file_path": file_path,
-                    "content": content,
-                    "type": "documentation",
-                    "metadata": {
-                        "topic": self._extract_topic(file_path),
-                        "code_blocks": self._extract_code_blocks(content),
-                    },
-                }
-            )
-
-        return docs
-
-    def _extract_metadata(self, content: str) -> Dict:
-        """Extract metadata from code content."""
-        metadata = {}
-
-        # Extract operation types (matmul, softmax, etc.)
-        if "matmul" in content.lower():
-            metadata["operation"] = "matmul"
-        elif "softmax" in content.lower():
-            metadata["operation"] = "softmax"
-        # Add more patterns as needed
-
-        # Extract optimization techniques used
-        if "tile" in content:
-            metadata["techniques"] = metadata.get("techniques", []) + ["tiling"]
-        if "vectorize" in content:
-            metadata["techniques"] = metadata.get("techniques", []) + ["vectorization"]
-
-        return metadata
-
-    def _extract_topic(self, file_path: str) -> str:
-        """Extract topic from file path."""
-        return Path(file_path).parent.name
-
-    def _extract_code_blocks(self, content: str) -> List[str]:
-        """Extract code blocks from markdown."""
-        import re
-
-        code_blocks = re.findall(r"```(?:python)?\n(.*?)\n```", content, re.DOTALL)
-        return code_blocks
-
-
-# ============= Step 2: Vector Store Setup =============
-
-
-class TileLangVectorStore:
-    """Manage vector storage for TileLang documents."""
-
-    def __init__(self, collection_name: str = "tilelang_examples"):
-        self.client = chromadb.Client()
-        self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
-        )
-        self.collection = self.client.create_collection(
-            name=collection_name, embedding_function=self.embedding_fn, metadata={"hnsw:space": "cosine"}
-        )
-
-    def add_documents(self, documents: List[Dict]):
-        """Add documents to the vector store."""
-        for i, doc in enumerate(documents):
-            # Create searchable text
-            searchable_text = self._create_searchable_text(doc)
-
-            # Store the actual code in metadata for retrieval
-            metadata = doc["metadata"].copy()
-            metadata["doc_type"] = doc["type"]
-            metadata["id"] = doc["id"]
-
-            # For examples, store paths to the actual files
-            if doc["type"] == "example":
-                metadata["dir_path"] = doc["dir_path"]
-
-            self.collection.add(
-                documents=[searchable_text], metadatas=[metadata], ids=[f"{doc['type']}_{doc['id']}_{i}"]
-            )
-
-    def _create_searchable_text(self, doc: Dict) -> str:
-        """Create searchable text from document."""
-        if doc["type"] == "example":
-            # Include both original and optimized code snippets
-            original_snippet = doc.get("original_code", "")[:300]
-            optimized_snippet = doc.get("tilelang_code", "")[:300]
-            techniques = doc["metadata"].get("optimization_techniques", [])
-
-            return f"""PyTorch to TileLang optimization example
-Operation: {doc['metadata'].get('operation', 'unknown')}
-Problem type: {doc['metadata'].get('problem_type', 'general')}
-Techniques: {', '.join(techniques)}
-Key insights: {' '.join(doc['metadata'].get('key_insights', []))}
-Original: {original_snippet}
-Optimized: {optimized_snippet}"""
-        else:
-            return doc["content"]
-
-    def search(self, query: str, k: int = 3) -> List[Dict]:
-        """Search for relevant documents."""
-        results = self.collection.query(query_texts=[query], n_results=k)
-        return results
-
-
-# ============= Step 3: DSPy RAG Setup =============
-
-
-class TileLangRetriever(dspy.Retrieve):
-    """Custom retriever for TileLang examples."""
-
-    def __init__(self, vector_store: TileLangVectorStore, k: int = 3):
-        self.vector_store = vector_store
-        self.k = k
-        super().__init__(k=k)
-
-    def forward(self, query: str) -> List[dspy.Example]:
-        """Retrieve relevant examples."""
-        results = self.vector_store.search(query, k=self.k)
-
-        examples = []
-        for i in range(len(results["ids"][0])):
-            metadata = results["metadatas"][0][i]
-
-            # If it's an example, load the actual code files
-            if metadata.get("doc_type") == "example" and "dir_path" in metadata:
-                example_dir = Path(metadata["dir_path"])
-
-                # Read the actual files
-                original_code = ""
-                tilelang_code = ""
-
-                original_path = example_dir / "original.py"
-                tilelang_path = example_dir / "tilelang.py"
-
-                if original_path.exists():
-                    with open(original_path, "r") as f:
-                        original_code = f.read()
-
-                if tilelang_path.exists():
-                    with open(tilelang_path, "r") as f:
-                        tilelang_code = f.read()
-
-                example = dspy.Example(
-                    document=results["documents"][0][i],
-                    original_code=original_code,
-                    tilelang_code=tilelang_code,
-                    metadata=metadata,
-                    relevance_score=results["distances"][0][i] if "distances" in results else 1.0,
-                )
-            else:
-                example = dspy.Example(
-                    document=results["documents"][0][i],
-                    metadata=metadata,
-                    relevance_score=results["distances"][0][i] if "distances" in results else 1.0,
-                )
-
-            examples.append(example)
-
-        return examples
-
-
-# ============= Step 4: DSPy Signatures =============
-
-
-class AnalyzePyTorch(dspy.Signature):
-    """Analyze PyTorch code to understand optimization opportunities."""
-
-    pytorch_code = dspy.InputField(desc="PyTorch model code to analyze")
-    analysis = dspy.OutputField(
-        desc="Analysis of the PyTorch code including operations and optimization opportunities"
-    )
-
-
-class GenerateTileLang(dspy.Signature):
-    """Generate optimized TileLang implementation."""
-
-    pytorch_code = dspy.InputField(desc="Original PyTorch model code")
-    analysis = dspy.InputField(desc="Analysis of optimization opportunities")
-    examples = dspy.InputField(desc="Relevant TileLang examples")
-    tilelang_code = dspy.OutputField(desc="Optimized TileLang implementation")
-
-
-# ============= Step 5: DSPy Module =============
-
-
-class TileLangOptimizer(dspy.Module):
-    """Main DSPy module for TileLang optimization."""
-
-    def __init__(self, retriever: TileLangRetriever, num_examples: int = 3):
-        super().__init__()
-        self.retriever = retriever
-        self.analyze = dspy.ChainOfThought(AnalyzePyTorch)
-        self.generate = dspy.ChainOfThought(GenerateTileLang)
-        self.num_examples = num_examples
-
-    def forward(self, pytorch_code: str) -> dspy.Prediction:
-        """Generate TileLang optimization for PyTorch code."""
-
-        # Step 1: Analyze the PyTorch code
-        analysis = self.analyze(pytorch_code=pytorch_code)
-
-        # Step 2: Retrieve relevant examples
-        # Create a query based on the analysis
-        query = f"{pytorch_code[:200]} {analysis.analysis[:200]}"
-        examples = self.retriever(query)
-
-        # Format examples for the prompt
-        formatted_examples = self._format_examples(examples[: self.num_examples])
-
-        # Step 3: Generate TileLang code
-        result = self.generate(
-            pytorch_code=pytorch_code, analysis=analysis.analysis, examples=formatted_examples
-        )
-
-        return result
-
-    def _format_examples(self, examples: List[dspy.Example]) -> str:
-        """Format retrieved examples for the prompt."""
-        formatted = []
-        for i, ex in enumerate(examples):
-            if hasattr(ex, "original_code") and hasattr(ex, "tilelang_code"):
-                formatted.append(
-                    f"""Example {i+1} - {ex.metadata.get('problem_type', 'Unknown')}:
+import numpy as np
+from typing import List, Dict
+
+# Configure DSPy with the LM at the start
+import os
+
+# Get API key from environment variable
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise ValueError("OPENAI_API_KEY environment variable must be set")
+
+lm = dspy.LM("openai/gpt-4o-mini", api_key=api_key)  # or 'openai/gpt-4' for better quality
+dspy.configure(lm=lm)
+
+
+# ============= Step 1: Load and Process Examples =============
+
+
+def load_tilelang_examples(examples_dir: str) -> tuple:
+    """Load TileLang examples and create a corpus for retrieval."""
+    examples = []
+    corpus_texts = []
+    corpus_metadata = []
+
+    # Each subdirectory is an example
+    for example_dir in [d for d in Path(examples_dir).iterdir() if d.is_dir()]:
+        example_id = example_dir.name
+
+        # Read the required files
+        original_path = example_dir / "original.py"
+        tilelang_path = example_dir / "tilelang.py"
+        metadata_path = example_dir / "metadata.json"
+
+        # Skip if required files don't exist
+        if not (original_path.exists() and tilelang_path.exists()):
+            print(f"Warning: Skipping {example_id} - missing required files")
+            continue
+
+        # Read files
+        with open(original_path, "r") as f:
+            original_code = f.read()
+
+        with open(tilelang_path, "r") as f:
+            tilelang_code = f.read()
+
+        # Read metadata if exists
+        metadata = {"example_id": example_id}
+        if metadata_path.exists():
+            with open(metadata_path, "r") as f:
+                metadata.update(json.load(f))
+
+        # Create example for training/validation
+        example = dspy.Example(
+            original_code=original_code, tilelang_code=tilelang_code, metadata=metadata
+        ).with_inputs("original_code")
+        examples.append(example)
+
+        # Create corpus entries for retrieval
+        # Entry 1: Original code with metadata
+        corpus_text = f"""Problem Type: {metadata.get('problem_type', 'unknown')}
+Operation: {metadata.get('operation', 'unknown')}
+Optimization Techniques: {', '.join(metadata.get('optimization_techniques', []))}
+Key Insights: {' '.join(metadata.get('key_insights', []))}
 
 Original PyTorch Code:
+{original_code[:1000]}..."""
+
+        corpus_texts.append(corpus_text)
+        corpus_metadata.append({"type": "original", "example_id": example_id, "dir_path": str(example_dir)})
+
+        # Entry 2: TileLang implementation
+        corpus_text = f"""Problem Type: {metadata.get('problem_type', 'unknown')}
+TileLang Optimized Implementation:
+{tilelang_code[:1000]}..."""
+
+        corpus_texts.append(corpus_text)
+        corpus_metadata.append({"type": "tilelang", "example_id": example_id, "dir_path": str(example_dir)})
+
+        print(f"Loaded example: {example_id}")
+
+    return examples, corpus_texts, corpus_metadata
+
+
+# ============= Step 2: Set up Retriever =============
+
+
+def setup_retriever(
+    corpus_texts: List[str],
+    corpus_metadata: List[Dict],
+    embedder_model: str = "openai/text-embedding-3-small",
+):
+    """Set up the DSPy retriever following the official tutorial."""
+
+    # Following the tutorial structure
+    max_characters = 6000  # for truncating documents
+    topk_docs_to_retrieve = 3  # number of documents to retrieve
+
+    # Truncate corpus texts
+    corpus_texts = [text[:max_characters] for text in corpus_texts]
+
+    print(f"Setting up retriever with {len(corpus_texts)} documents...")
+
+    # Create embedder and retriever as in the tutorial
+    embedder = dspy.Embedder(embedder_model, dimensions=512)
+    search = dspy.retrievers.Embeddings(embedder=embedder, corpus=corpus_texts, k=topk_docs_to_retrieve)
+
+    # Store metadata separately for later use
+    search.corpus_metadata = corpus_metadata
+
+    return search
+
+
+# ============= Step 3: Define RAG Module =============
+
+
+class TileLangRAG(dspy.Module):
+    """RAG module for TileLang optimization following the tutorial structure."""
+
+    def __init__(self, search_fn):
+        super().__init__()
+        self.search = search_fn
+        self.respond = dspy.ChainOfThought("context, pytorch_code -> tilelang_code")
+
+    def forward(self, pytorch_code: str):
+        # Search for relevant examples
+        context_results = self.search(pytorch_code)
+
+        # Get the actual code from the examples
+        context_parts = []
+        seen_examples = set()
+
+        for i, passage in enumerate(context_results.passages):
+            # Get metadata for this result
+            if hasattr(self.search, "corpus_metadata") and i < len(self.search.corpus_metadata):
+                metadata = self.search.corpus_metadata[i]
+                example_id = metadata.get("example_id", "")
+
+                # Avoid duplicates from same example
+                if example_id in seen_examples:
+                    continue
+                seen_examples.add(example_id)
+
+                # Load the full code if we have the path
+                if "dir_path" in metadata:
+                    example_dir = Path(metadata["dir_path"])
+
+                    # Add a complete example to context
+                    original_path = example_dir / "original.py"
+                    tilelang_path = example_dir / "tilelang.py"
+
+                    if original_path.exists() and tilelang_path.exists():
+                        with open(original_path, "r") as f:
+                            original = f.read()
+                        with open(tilelang_path, "r") as f:
+                            tilelang = f.read()
+
+                        context_parts.append(
+                            f"""Example {len(context_parts) + 1} - {example_id}:
+Original PyTorch:
 ```python
-{ex.original_code}
+{original[:1500]}
 ```
 
-Optimized TileLang Code:
+Optimized TileLang:
 ```python
-{ex.tilelang_code}
+{tilelang[:1500]}
 ```
-
-Optimization Techniques: {', '.join(ex.metadata.get('optimization_techniques', []))}
 """
-                )
+                        )
             else:
-                formatted.append(f"Example {i+1}:\n{ex.document}\n")
+                # Fallback to passage text
+                context_parts.append(f"Example {i+1}:\n{passage}")
 
-        return "\n".join(formatted)
+        context = "\n---\n".join(context_parts)
+
+        # Generate TileLang code
+        return self.respond(context=context, pytorch_code=pytorch_code)
 
 
-# ============= Step 6: Main Pipeline =============
+# ============= Step 4: Define Evaluation Metric =============
 
 
-def setup_tilelang_pipeline(
-    examples_dir: str, docs_dir: str, openai_api_key: str = None, model: str = "gpt-4"
-) -> TileLangOptimizer:
+def tilelang_correctness_metric(example, pred, trace=None):
+    """
+    Evaluate if the generated TileLang code is correct.
+    This is a simplified metric - you should implement proper validation.
+    """
+    score = 0.0
+
+    # Check if ModelNew class exists
+    if "class ModelNew" in pred.tilelang_code:
+        score += 0.25
+
+    # Check if it imports tilelang
+    if "import tilelang" in pred.tilelang_code:
+        score += 0.25
+
+    # Check if it has a forward method
+    if "def forward" in pred.tilelang_code:
+        score += 0.25
+
+    # Check if it uses T.prim_func or T.kernel
+    if "@T.prim_func" in pred.tilelang_code or "@T.kernel" in pred.tilelang_code:
+        score += 0.25
+
+    return score
+
+
+# ============= Step 5: Main Pipeline Setup =============
+
+
+def setup_tilelang_pipeline(examples_dir: str, model: str = None, api_key: str = None):
     """Set up the complete TileLang optimization pipeline."""
 
-    # Configure DSPy with OpenAI
-    if openai_api_key:
-        lm = dspy.OpenAI(model=model, api_key=openai_api_key)
-    else:
-        # Use environment variable
-        lm = dspy.OpenAI(model=model)
+    # Optionally reconfigure with a different model
+    if model:
+        if api_key:
+            lm = dspy.LM(model, api_key=api_key)
+        else:
+            lm = dspy.LM(model)  # Uses OPENAI_API_KEY env var
+        dspy.configure(lm=lm)
 
-    dspy.settings.configure(lm=lm)
+    # Load examples and create corpus
+    print("Loading TileLang examples...")
+    examples, corpus_texts, corpus_metadata = load_tilelang_examples(examples_dir)
 
-    # Process documents
-    print("Processing documents...")
-    processor = TileLangDocumentProcessor(base_path=".")
-    examples = processor.process_tilelang_examples(examples_dir)
-    docs = processor.process_documentation(docs_dir)
+    # Set up retriever
+    search = setup_retriever(corpus_texts, corpus_metadata)
 
-    # Set up vector store
-    print("Setting up vector store...")
-    vector_store = TileLangVectorStore()
-    vector_store.add_documents(examples + docs)
+    # Create RAG module
+    rag = TileLangRAG(search)
 
-    # Create retriever
-    retriever = TileLangRetriever(vector_store, k=3)
+    return rag, examples
 
-    # Create optimizer
-    optimizer = TileLangOptimizer(retriever, num_examples=3)
 
-    return optimizer
+# ============= Step 6: Optimization =============
+
+
+def optimize_pipeline(rag, examples, metric=None):
+    """Optimize the RAG pipeline using DSPy optimizers."""
+
+    if metric is None:
+        metric = tilelang_correctness_metric
+
+    # Split examples into train and validation
+    import random
+
+    random.Random(0).shuffle(examples)
+
+    train_size = min(20, len(examples) // 5)  # 20% for training
+    trainset = examples[:train_size]
+    valset = examples[train_size:]
+
+    print(f"Optimizing with {len(trainset)} training and {len(valset)} validation examples")
+
+    # Use MIPROv2 optimizer as in the tutorial
+    tp = dspy.MIPROv2(metric=metric, auto="medium", num_threads=8)
+
+    optimized_rag = tp.compile(
+        rag,
+        trainset=trainset,
+        valset=valset,
+        max_bootstrapped_demos=2,
+        max_labeled_demos=2,
+        requires_permission_to_run=False,
+    )
+
+    return optimized_rag
 
 
 # ============= Step 7: Usage Example =============
 
 
 def main():
-    """Example usage of the TileLang optimization pipeline."""
+    """Example usage following the tutorial pattern."""
 
-    # Set up the pipeline
-    optimizer = setup_tilelang_pipeline(
-        examples_dir="../TileLang/examples",
-        docs_dir="../TileLang/docs",
-        openai_api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4",
-    )
+    # Set up the pipeline (uses the default model configured at top)
+    rag, examples = setup_tilelang_pipeline(examples_dir="./examples")
 
     # Example PyTorch code to optimize
     pytorch_code = open("../KernelBench/KernelBench/level1/19_ReLU.py").read()
 
     # Generate optimization
-    result = optimizer(pytorch_code)
+    print("\nGenerating TileLang optimization...")
+    result = rag(pytorch_code)
 
-    print("Analysis:", result.analysis)
     print("\nGenerated TileLang Code:")
     print(result.tilelang_code)
 
-    # Optionally, compile with DSPy optimizers
-    # This requires a validation dataset
-    if False:  # Set to True if you have validation data
-        from dspy.teleprompt import BootstrapFewShot
+    # Optionally optimize the pipeline
+    if len(examples) > 10:
+        print("\nOptimizing pipeline...")
+        optimized_rag = optimize_pipeline(rag, examples)
 
-        # Create training examples
-        trainset = [
-            dspy.Example(pytorch_code="...", tilelang_code="...").with_inputs("pytorch_code")
-            # Add more examples
-        ]
+        # Save the optimized model
+        optimized_rag.save("optimized_tilelang_rag.json")
+        print("Saved optimized model to optimized_tilelang_rag.json")
 
-        # Optimize
-        teleprompter = BootstrapFewShot(metric=tilelang_correctness_metric)
-        optimized_optimizer = teleprompter.compile(optimizer, trainset=trainset)
+        # Test optimized version
+        optimized_result = optimized_rag(pytorch_code)
+        print("\nOptimized TileLang Code:")
+        print(optimized_result.tilelang_code)
+
+    # Inspect history to see prompts
+    print("\nInspecting last prompt:")
+    dspy.inspect_history(n=1)
 
 
-def tilelang_correctness_metric(example, pred, trace=None):
-    """Metric for evaluating TileLang generation quality."""
-    # Implement your evaluation logic here
-    # Could check for:
-    # - Syntax correctness
-    # - Presence of required class structure
-    # - Use of TileLang primitives
-    return 1.0  # Placeholder
+# ============= Integration with your inference script =============
+
+
+def generate_with_rag(pytorch_model_code: str, examples_dir: str = "../TileLang/examples"):
+    """
+    Function to use in your inference script instead of direct LLM calls.
+    """
+    # Load saved optimized model if available
+    rag = TileLangRAG(None)  # Dummy init
+
+    try:
+        # Try to load optimized version
+        rag.load("optimized_tilelang_rag.json")
+        print("Loaded optimized RAG model")
+    except:
+        # Fall back to creating new one
+        rag, _ = setup_tilelang_pipeline(examples_dir)
+        print("Using unoptimized RAG model")
+
+    # Generate TileLang code
+    result = rag(pytorch_model_code)
+
+    # Extract just the code part (similar to your original format)
+    return result.tilelang_code
 
 
 if __name__ == "__main__":
