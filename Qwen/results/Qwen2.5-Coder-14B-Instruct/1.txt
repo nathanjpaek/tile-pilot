@@ -1,0 +1,102 @@
+<think>
+The given PyTorch model performs a Softmax activation on an input tensor. The Softmax function is defined as:
+
+\[ \text{Softmax}(x_i) = \frac{e^{x_i}}{\sum_{j} e^{x_j}} \]
+
+To optimize this using TileLang, we need to implement the following steps in the TileLang kernel:
+1. Compute the exponentials of the input elements.
+2. Sum the exponentials along the specified dimension (in this case, dimension 1).
+3. Divide each exponential by the sum of exponentials to get the Softmax output.
+
+The previous error indicates that the TileLang library does not have an `add` function. Instead, we should use the `+` operator for addition. We need to ensure that all operations are correctly implemented using TileLang constructs.
+
+Here is the plan for the TileLang kernel:
+1. Define a function to compute the exponentials of the input tensor.
+2. Define a function to sum the exponentials along the specified dimension.
+3. Compute the Softmax output by dividing each exponential by the sum.
+
+We will use TileLang's grid and parallelism constructs to optimize the computation.
+</think>
+
+<code>
+import torch
+import torch.nn as nn
+import tilelang
+import tilelang.language as T
+
+def softmax(batch_size, dim, block_size=32, dtype="float16", accum_dtype="float32"):
+
+    @T.prim_func
+    def main(
+        x: T.Tensor((batch_size, dim), dtype),
+        softmax_output: T.Tensor((batch_size, dim), dtype),
+    ):
+        # Define a grid with enough blocks to cover the batch_size and dim
+        with T.Kernel(T.ceildiv(dim, block_size), threads=256) as (bdx, bdy):
+            # Allocate shared memory for the current tile of exponentials
+            exp_x_shared = T.alloc_shared((block_size,), dtype)
+            sum_exp_x_shared = T.alloc_shared((1,), dtype)
+
+            # Allocate local (register) fragments for partial accumulations
+            exp_x_local = T.alloc_fragment((block_size,), dtype)
+            sum_exp_x_local = T.alloc_fragment((1,), dtype)
+
+            # Initialize the local accumulation buffer to zero
+            T.clear(exp_x_local)
+            T.clear(sum_exp_x_local)
+
+            # Initialize the shared accumulation buffer to zero
+            T.atomic_min(sum_exp_x_shared[0], 0.0)
+
+            # Loop over the elements in the current block
+            for idx in T.arange(block_size):
+                # Compute the exponential of the current element
+                exp_x_local[idx] = T.exp(x[bdy, bdx * block_size + idx])
+
+                # Accumulate the exponential in shared memory
+                T.atomic_add(sum_exp_x_shared[0], exp_x_local[idx])
+
+            # Synchronize shared memory to ensure all threads have the correct sum
+            T.sync_threads()
+
+            # Copy the accumulated sum to local memory
+            sum_exp_x_local[0] = sum_exp_x_shared[0]
+
+            # Loop over the elements in the current block again to compute the softmax
+            for idx in T.arange(block_size):
+                softmax_output[bdy, bdx * block_size + idx] = exp_x_local[idx] / sum_exp_x_local[0]
+
+    return main
+
+
+def tilelang_softmax(x):
+    # TileLang inputs must be in float16 precision
+    x = x.cuda().half()
+    batch_size, dim = x.shape
+    
+    # Compile the TileLang kernel with out_idx=-1 to create the output tensor during runtime
+    func = softmax(batch_size, dim)
+    kernel = tilelang.compile(func, out_idx=-1)
+    return kernel(x)
+
+
+class ModelNew(nn.Module):
+    """
+    Optimized model using TileLang for Softmax activation.
+    """
+
+    def __init__(self):
+        super(ModelNew, self).__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Applies Softmax activation to the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, num_features).
+
+        Returns:
+            torch.Tensor: Output tensor with Softmax applied, same shape as input.
+        """
+        return tilelang_softmax(x)
+</code>

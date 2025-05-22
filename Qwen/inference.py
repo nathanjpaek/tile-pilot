@@ -31,9 +31,9 @@ llm = LLM(model=MODEL_NAME, max_model_len=4096, gpu_memory_utilization=0.9)
 
 SOURCE = open("../KernelBench/KernelBench/level1/6_Matmul_with_large_K_dimension_.py").read()
 
-PYTORCH_MODEL = open("../KernelBench/KernelBench/level1/16_Matmul_with_transposed_A.py").read()
+PYTORCH_MODEL = open("../KernelBench/KernelBench/level1/23_Softmax.py").read()
 
-TILELANG_SOURCE = open("../TileLang/kb/tilelang_6.py").read()
+TILELANG_SOURCE = open("../TileLang/kb/correct-tilelang-6.py").read()
 
 SYSTEM_PROMPT = """You are an expert kernel engineer specializing in TileLang.
 1. First, analyze the PyTorch model inside <think> and </think> tags. Here you can reason about the computation, identify optimization opportunities, and plan your kernel implementation.
@@ -89,9 +89,6 @@ class ModelNew(nn.Module):
         # Call the compiled kernel
         ...
 </code>
-
----
-
 """
 
 # Retrieve the problem from the dataset

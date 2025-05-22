@@ -7,11 +7,7 @@ import tilelang.language as T
 def matmul(M, N, K, block_M=128, block_N=128, block_K=32, dtype="float16", accum_dtype="float"):
 
     @T.prim_func
-    def main(
-        A: T.Tensor((M, K), dtype),
-        B: T.Tensor((K, N), dtype),
-        C: T.Tensor((M, N), dtype),
-    ):
+    def main(A: T.Tensor((M, K), dtype), B: T.Tensor((K, N), dtype), C: T.Tensor((M, N), dtype)):
         # Define a grid with enough blocks to cover M×N
         with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by):
             # Allocate shared memory for the current tile of A and B
@@ -45,7 +41,7 @@ def tilelang_matmul(A, B):
     B = B.cuda().half()
     M, K = A.shape
     N = B.shape[1]
-    
+
     # Compile the TileLang kernel with out_idx=-1 to create the output tensor during runtime
     func = matmul(M, N, K)
     kernel = tilelang.compile(func, out_idx=-1)

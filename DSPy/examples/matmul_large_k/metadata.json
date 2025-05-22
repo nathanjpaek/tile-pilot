@@ -1,0 +1,24 @@
+{
+    "problem_type": "matmul_large_k",
+    "operation": "matmul",
+    "optimization_techniques": [
+        "tiling",
+        "shared_memory",
+        "cooperative_loading",
+        "pipelining",
+        "vectorization"
+    ],
+    "key_insights": [
+        "Large K dimension causes poor cache behavior in naive implementation",
+        "Tiling along K dimension improves temporal locality",
+        "Shared memory reduces global memory traffic",
+        "Cooperative loading maximizes memory bandwidth utilization",
+        "Pipelining hides memory latency"
+    ],
+    "use_cases": [
+        "Linear layers with large hidden dimensions",
+        "Transformer feed-forward networks",
+        "Large vocabulary embeddings"
+    ],
+    "tags": ["gemm", "large_k", "memory_bound", "tiling"]
+}

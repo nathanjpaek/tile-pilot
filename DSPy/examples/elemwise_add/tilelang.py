@@ -5,21 +5,6 @@ import tilelang.language as T
 
 
 def elementwise_add(M, N, block_M=128, block_N=256, in_dtype="float16", out_dtype="float16", threads=128):
-    """
-    Creates a TileLang kernel for element-wise addition of two matrices.
-
-    Args:
-        M: Number of rows in input matrices
-        N: Number of columns in input matrices
-        block_M: Block size for M dimension (default: 128)
-        block_N: Block size for N dimension (default: 256)
-        in_dtype: Input tensor data type (default: "float16")
-        out_dtype: Output tensor data type (default: "float16")
-        threads: Number of threads per block (default: 128)
-
-    Returns:
-        A TileLang primitive function that performs element-wise addition
-    """
 
     @T.prim_func
     def main(

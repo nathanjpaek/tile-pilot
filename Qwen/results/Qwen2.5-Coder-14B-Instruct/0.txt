@@ -1,20 +1,22 @@
 <think>
-The given PyTorch model performs a matrix multiplication where the first operand \( A \) is transposed before the multiplication. Specifically, \( C = A^T \cdot B \). To optimize this using TileLang, we need to implement the transpose operation efficiently and then perform the matrix multiplication.
+The given PyTorch model performs a Softmax activation on the input tensor. The Softmax function is defined as:
 
-### Steps to Optimize:
-1. **Transpose Operation**: Implement the transpose operation for the tensor \( A \).
-2. **Matrix Multiplication**: Implement an optimized matrix multiplication kernel using TileLang.
-3. **Integration**: Integrate the compiled TileLang kernels into the `ModelNew` class.
+\[ \text{softmax}(x_i) = \frac{e^{x_i}}{\sum_{j} e^{x_j}} \]
 
-### Key Points:
-- The transpose operation needs to be efficient, especially for large tensors.
-- The matrix multiplication should leverage blocking and parallelism for performance improvements.
-- Ensure both operations are correctly integrated into the `forward` method.
+To optimize this using TileLang, we need to implement the following steps:
 
-### Block and Parallelism Strategy:
-- Use blocking to reduce the amount of data loaded into shared memory at once.
-- Utilize parallelism within and across blocks to maximize GPU utilization.
+1. **Exponentiation**: Compute \( e^{x_i} \) for each element in the tensor.
+2. **Summation**: Compute the sum of the exponentiated values along the specified dimension.
+3. **Division**: Divide each exponentiated value by the sum computed in the previous step.
 
+We can leverage TileLang's parallelism and memory access patterns to efficiently perform these operations. The key is to ensure that the operations are tile-based and can be parallelized effectively.
+
+### Implementation Plan:
+1. **Exponentiation**: Use parallelism to compute the exponential of each element.
+2. **Summation**: Use a reduction operation to sum the exponentiated values along the specified dimension.
+3. **Division**: Use parallelism to divide each element by the sum.
+
+By using TileLang's constructs, we can ensure that these operations are performed efficiently on the GPU.
 </think>
 
 <code>
@@ -23,72 +25,66 @@ import torch.nn as nn
 import tilelang
 import tilelang.language as T
 
-def transpose(M, N, block_M=128, block_N=128, dtype="float16"):
-    @tilelang.jit(
-        out_idx=-1,  # create the output tensor during runtime
-    )
+
+def softmax(batch_size, dim):
     @T.prim_func
     def main(
-        A: T.Tensor((M, N), dtype),
-        A_T: T.Tensor((N, M), dtype),
+        x: T.Tensor((batch_size, dim), "float32"),
+        y: T.Tensor((batch_size, dim), "float32"),
     ):
-        with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by):
-            A_local = T.alloc_fragment((block_M, block_N), dtype)
+        with T.Kernel(batch_size, threads=128) as bx:
+            # Allocate a local fragment for exponentiation results
+            exp_x = T.alloc_fragment((dim,), "float32")
 
-            for m in T.Parallel(block_M):
-                for n in T.Parallel(block_N):
-                    A_local[m, n] = A[by * block_M + m, bx * block_N + n]
+            # Exponentiate each element in the input tensor
+            for idx in range(dim):
+                exp_x[idx] = T.exp(x[bx, idx])
 
-            T.copy(A_local, A_T[bx * block_N, by * block_M])
+            # Allocate a local fragment for the sum of exponentiated values
+            sum_exp_x = T.alloc_fragment((1,), "float32")
+            T.clear(sum_exp_x)
+
+            # Compute the sum of exponentiated values
+            for idx in range(dim):
+                sum_exp_x[0] = T.add(sum_exp_x[0], exp_x[idx])
+
+            # Normalize the exponentiated values by the sum
+            for idx in range(dim):
+                y[bx, idx] = T.div(exp_x[idx], sum_exp_x[0])
 
     return main
 
-def matmul(M, N, K, block_M=128, block_N=128, block_K=32, dtype="float16", accum_dtype="float"):
-    @tilelang.jit(
-        out_idx=-1,  # create the output tensor during runtime
-    )
-    @T.prim_func
-    def main(
-        A: T.Tensor((M, K), dtype),
-        B: T.Tensor((K, N), dtype),
-        C: T.Tensor((M, N), dtype),
-    ):
-        with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by):
-            A_shared = T.alloc_shared((block_M, block_K), dtype)
-            B_shared = T.alloc_shared((block_K, block_N), dtype)
-            C_local = T.alloc_fragment((block_M, block_N), accum_dtype)
 
-            T.clear(C_local)
+def tilelang_softmax(x):
+    M, N = x.shape
+    func = softmax(M, N)
+    kernel = tilelang.compile(func, out_idx=-1)
+    return kernel(x)
 
-            for ko in T.Pipelined(T.ceildiv(K, block_K), num_stages=3):
-                T.copy(A[by * block_M, ko * block_K], A_shared)
-                for k, j in T.Parallel(block_K, block_N):
-                    B_shared[k, j] = B[ko * block_K + k, bx * block_N + j]
-                T.gemm(A_shared, B_shared, C_local)
-
-            T.copy(C_local, C[by * block_M, bx * block_N])
-
-    return main
 
 class ModelNew(nn.Module):
+    """
+    Optimized model using TileLang for Softmax activation.
+    """
+
     def __init__(self):
         super(ModelNew, self).__init__()
-        self.transpose_kernel = transpose(K, M)
-        self.matmul_kernel = matmul(M, N, K)
+        # Define and compile TileLang kernel
+        self.kernel = tilelang_softmax
 
-    def forward(self, A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
-        A = A.to(device="cuda", dtype=torch.float16)
-        B = B.to(device="cuda", dtype=torch.float16)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Applies Softmax activation to the input tensor.
 
-        A_T = torch.empty((M, K), device="cuda", dtype=torch.float16)
-        self.transpose_kernel(A, A_T)
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, num_features).
 
-        C = torch.empty((M, N), device="cuda", dtype=torch.float16)
-        self.matmul_kernel(A_T, B, C)
+        Returns:
+            torch.Tensor: Output tensor with Softmax applied, same shape as input.
+        """
+        return self.kernel(x)
 
-        return C
 
-M = 1024
-K = 4096
-N = 2048
+batch_size = 16
+dim = 16384
 </code>
